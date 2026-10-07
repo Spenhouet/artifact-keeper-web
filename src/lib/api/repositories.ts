@@ -297,6 +297,12 @@ function adaptRepository(sdk: RepositoryResponse): Repository {
     // predates #2367 and omits the flag at runtime.
     versioning_enabled: sdk.versioning_enabled ?? false,
     storage_used_bytes: sdk.storage_used_bytes,
+    // `member_storage_used_bytes` (#4423): not in the generated SDK yet.
+    member_storage_used_bytes: (() => {
+      const v = (sdk as RepositoryResponse & { member_storage_used_bytes?: unknown })
+        .member_storage_used_bytes;
+      return typeof v === 'number' ? v : null;
+    })(),
     quota_bytes: sdk.quota_bytes ?? undefined,
     upstream_url: sdk.upstream_url ?? undefined,
     upstream_auth_type: sdk.upstream_auth_type ?? undefined,
@@ -347,6 +353,8 @@ function adaptVirtualMember(sdk: VirtualMemberResponse): VirtualRepoMember {
     virtual_repo_id: '',
     member_repo_id: sdk.member_repo_id,
     member_repo_key: sdk.member_repo_key,
+    member_repo_name: sdk.member_repo_name ?? undefined,
+    member_repo_type: sdk.member_repo_type ?? undefined,
     priority: sdk.priority,
     created_at: sdk.created_at,
   };

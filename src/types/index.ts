@@ -89,6 +89,14 @@ export interface Repository {
    */
   versioning_enabled?: boolean;
   storage_used_bytes: number;
+  /**
+   * Virtual repositories only (backend artifact-keeper#4423, 1.11.0): the
+   * combined size of the members the caller can see. A virtual repository's
+   * own `storage_used_bytes` is 0 from 1.11.0 (it stores nothing); totals
+   * across repositories keep summing `storage_used_bytes`. `null`/absent for
+   * other types and older backends.
+   */
+  member_storage_used_bytes?: number | null;
   quota_bytes?: number;
   // For remote repositories
   upstream_url?: string;
@@ -280,6 +288,10 @@ export interface VirtualRepoMember {
   virtual_repo_id: string;
   member_repo_id: string;
   member_repo_key: string;
+  /** Display name of the member repository; absent on older adapters. */
+  member_repo_name?: string;
+  /** `local`, `remote`, `staging` or `virtual`, as the backend reports it. */
+  member_repo_type?: string;
   priority: number;
   created_at: string;
 }
@@ -348,6 +360,8 @@ export interface Artifact {
    * repository other than `repository_key`.
    */
   origin?: ArtifactOrigin | null;
+  /** Uploader's username, on the by-id detail response (#3271). */
+  uploaded_by_username?: string | null;
 }
 
 /**
