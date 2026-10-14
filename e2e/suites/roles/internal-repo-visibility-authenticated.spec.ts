@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { TEST_ROLES } from '../../setup/auth-states';
 
 /**
  * Authenticated half of the `internal` repository visibility contract.
@@ -65,11 +66,39 @@ test.describe('Internal repository visibility (authenticated, no grant)', () => 
     expect(resp.ok()).toBe(true);
   });
 
-  test('OCI read against an internal repo succeeds', async ({ request }) => {
-    // The tag list is the cheapest authenticated read that exercises the
-    // `/v2` gate; an empty repository still answers 200 with an empty list.
-    const resp = await request.get('/v2/e2e-internal-docker/tags/list');
-    expect(resp.status()).toBe(200);
+  test('OCI read against an internal repo is admitted', async ({ request }) => {
+    // The registry API authenticates like a docker client, from the
+    // Authorization header only (Bearer or Basic): `extract_oci_credential`
+    // in the backend's oci_v2 handler never reads the web session cookie, so
+    // the project's storage state alone is answered with the 401 challenge
+    // (#966). Present the same user over Basic auth instead. What the test
+    // proves is unchanged: `e2e-restricted` holds no grant on this repository
+    // and is admitted on the strength of `internal` visibility alone.
+    const { username, password } = TEST_ROLES.restricted;
+    const basic = Buffer.from(`${username}:${password}`).toString('base64');
+    const headers = { Authorization: `Basic ${basic}` };
+
+    // The seeded repository holds no image. The registry answers an empty tag
+    // list with 404 NAME_UNKNOWN, byte-identical to the existence-hiding
+    // answer a DENIED read gets (backend #3716), so `tags/list` cannot show
+    // that the caller was admitted. A manifest fetch can: past the read gate
+    // a local repository answers a missing manifest with MANIFEST_UNKNOWN,
+    // while a denied or unknown name answers NAME_UNKNOWN.
+    const resp = await request.get('/v2/e2e-internal-docker/no-such-image/manifests/latest', {
+      headers,
+    });
+    expect(resp.status()).toBe(404);
+    const body = await resp.json();
+    expect(body.errors?.[0]?.code).toBe('MANIFEST_UNKNOWN');
+
+    // The control: the same caller against a key that names no repository
+    // gets the denial shape, so the two codes are telling them apart.
+    const unknown = await request.get('/v2/e2e-no-such-docker/no-such-image/manifests/latest', {
+      headers,
+    });
+    expect(unknown.status()).toBe(404);
+    const unknownBody = await unknown.json();
+    expect(unknownBody.errors?.[0]?.code).toBe('NAME_UNKNOWN');
   });
 
   test('search returns internal repo artifacts', async ({ request }) => {
