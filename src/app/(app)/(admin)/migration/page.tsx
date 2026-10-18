@@ -102,6 +102,8 @@ function statusColor(
   switch (status) {
     case "completed":
       return "green";
+    case "completed_with_errors":
+      return "yellow";
     case "running":
     case "assessing":
       return "blue";
@@ -129,6 +131,7 @@ function formatDuration(seconds: number): string {
 // these so we don't 404 on in-flight jobs.
 const TERMINAL_STATUSES: ReadonlySet<MigrationJobStatus> = new Set([
   "completed",
+  "completed_with_errors",
   "failed",
   "cancelled",
 ]);
@@ -137,7 +140,8 @@ const TERMINAL_STATUSES: ReadonlySet<MigrationJobStatus> = new Set([
 // returns can lag (e.g. a job with nothing to transfer reports 0). Other
 // statuses keep their real, rounded progress.
 function jobProgress(job: MigrationJob): number {
-  if (job.status === "completed") return 100;
+  if (job.status === "completed" || job.status === "completed_with_errors")
+    return 100;
   return Math.round(job.progress_percent ?? 0);
 }
 
@@ -177,6 +181,26 @@ function effectiveTotal(job: MigrationJob): number {
   const processed =
     job.completed_items + job.failed_items + job.skipped_items;
   return Math.max(job.total_items, processed);
+}
+
+// The backend lists at most this many failed items in a report's `errors`.
+const REPORT_ERROR_CAP = 100;
+
+// Backend reports carry recommendations as `{ repository, action }` objects
+// (artifact-keeper#3925); older ones, and the local type, are plain strings.
+// Rendering an object as a React child throws, so read either shape.
+function recommendationText(rec: unknown): string {
+  if (typeof rec === "string") return rec;
+  if (rec && typeof rec === "object" && "action" in rec) {
+    const action = (rec as { action?: unknown }).action;
+    if (typeof action === "string") return action;
+  }
+  return JSON.stringify(rec);
+}
+
+// "completed_with_errors" -> "completed with errors" for the status badge.
+function statusLabel(status: string): string {
+  return status.replace(/_/g, " ");
 }
 
 // Same story for bytes: total_bytes can be 0 while bytes were transferred.
@@ -776,7 +800,9 @@ export default function MigrationPage() {
     {
       id: "status",
       header: "Status",
-      cell: (j) => <StatusBadge status={j.status} color={statusColor(j.status)} />,
+      cell: (j) => (
+        <StatusBadge status={statusLabel(j.status)} color={statusColor(j.status)} />
+      ),
     },
     {
       id: "progress",
@@ -887,10 +913,7 @@ export default function MigrationPage() {
               <TooltipContent>Cancel</TooltipContent>
             </Tooltip>
           )}
-          {(j.status === "completed" ||
-            j.status === "failed" ||
-            j.status === "cancelled" ||
-            j.status === "pending") && (
+          {(TERMINAL_STATUSES.has(j.status) || j.status === "pending") && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -1655,7 +1678,7 @@ export default function MigrationPage() {
                 <div>
                   <p className="text-xs text-muted-foreground">Status</p>
                   <StatusBadge
-                    status={detailJob.status}
+                    status={statusLabel(detailJob.status)}
                     color={statusColor(detailJob.status)}
                   />
                 </div>
@@ -1839,10 +1862,32 @@ export default function MigrationPage() {
                       <p className="font-semibold">{report.errors?.length ?? 0}</p>
                     </div>
                   </div>
+                  {(report.errors?.length ?? 0) > 0 && (
+                    <div className="space-y-1" data-testid="report-failed-items">
+                      <p className="text-xs font-medium">
+                        Failed items
+                        {report.errors.length >= REPORT_ERROR_CAP &&
+                          ` (first ${REPORT_ERROR_CAP})`}
+                      </p>
+                      <ul className="max-h-48 space-y-1 overflow-y-auto text-xs">
+                        {report.errors.map((err, i) => (
+                          <li key={i} className="break-all">
+                            {err.item_path && (
+                              <span className="font-mono">{err.item_path}</span>
+                            )}
+                            {err.item_path && err.message && " — "}
+                            <span className="text-muted-foreground">
+                              {err.message || err.code}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   {(report.recommendations?.length ?? 0) > 0 && (
                     <ul className="list-disc pl-5 text-xs text-muted-foreground">
                       {report.recommendations.map((rec, i) => (
-                        <li key={i}>{rec}</li>
+                        <li key={i}>{recommendationText(rec)}</li>
                       ))}
                     </ul>
                   )}

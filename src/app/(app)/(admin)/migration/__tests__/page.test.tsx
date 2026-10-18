@@ -14,6 +14,7 @@ import {
   cleanup,
   fireEvent,
   act,
+  within,
 } from "@testing-library/react";
 
 // ---------------------------------------------------------------------------
@@ -1223,6 +1224,7 @@ describe("MigrationPage — migrations tab and status mutations", () => {
   it("statusColor maps every job status to a color via rendered StatusBadge", async () => {
     const statuses: MigrationJobStatus[] = [
       "completed",
+      "completed_with_errors",
       "running",
       "assessing",
       "paused",
@@ -1242,7 +1244,7 @@ describe("MigrationPage — migrations tab and status mutations", () => {
     await switchToJobsTab();
     // Every status string appears in a StatusBadge cell.
     for (const s of statuses) {
-      expect(screen.getAllByText(s).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(s.replace(/_/g, " ")).length).toBeGreaterThan(0);
     }
   });
 });
@@ -1629,6 +1631,80 @@ describe("MigrationPage — feature parity (#520)", () => {
       "job-term-0002",
       "html",
     );
+  });
+
+  // artifact-keeper-web#886: the backend's `completed_with_errors` fell back to
+  // "pending", so a finished job read as not started and its report stayed
+  // hidden behind the terminal-status gate.
+  it("treats a completed_with_errors job as finished: 100% and its report", async () => {
+    const job = makeJob({
+      id: "job-cwe-0001",
+      status: "completed_with_errors",
+      total_items: 145144,
+      completed_items: 145129,
+      failed_items: 15,
+      progress_percent: 99.99,
+    });
+    configureQueries({
+      connections: { data: [makeConnection()] },
+      migrations: { data: { items: [job], pagination: {} } },
+      report: { data: makeReport({ job_id: job.id }) },
+    });
+    await renderPage();
+    await switchToJobsTab();
+    expect(screen.getAllByText("completed with errors").length).toBeGreaterThan(0);
+    expect(screen.queryByText("pending")).not.toBeInTheDocument();
+    expect(screen.getAllByText("100%").length).toBeGreaterThan(0);
+    expect(screen.queryByText("~100%")).not.toBeInTheDocument();
+
+    await act(async () => fireEvent.click(screen.getByText("job-cwe-...")));
+    const reportQuery = mockUseQuery.mock.calls
+      .map(([opts]) => opts as QueryOpts & { enabled?: boolean })
+      .filter((o) => o.queryKey[1] === "report")
+      .at(-1);
+    expect(reportQuery?.enabled).toBe(true);
+    expect(screen.getByText("Reconciliation Report")).toBeInTheDocument();
+  });
+
+  // #886 asks which items failed. The backend's report lists up to 100 failed
+  // items in `errors` ({ code, message, item_path }); its recommendations are
+  // `{ repository, action }` objects, which must not reach React as children.
+  it("lists the report's failed items and renders object recommendations", async () => {
+    const job = makeJob({
+      id: "job-cwe-0002",
+      status: "completed_with_errors",
+      failed_items: 2,
+    });
+    const report = makeReport({
+      job_id: job.id,
+      errors: [
+        {
+          code: "MIGRATION_FAILED",
+          message: "upstream returned 404",
+          item_path: "com/acme/lib/1.0/lib-1.0.jar",
+        },
+        { code: "MIGRATION_FAILED", message: "checksum mismatch", item_path: "com/acme/b/2.0/b.pom" },
+      ],
+      recommendations: [
+        { repository: "conan-local", action: "Repository 'conan-local' needs re-publishing." },
+      ] as unknown as string[],
+    });
+    configureQueries({
+      connections: { data: [makeConnection()] },
+      migrations: { data: { items: [job], pagination: {} } },
+      report: { data: report },
+    });
+    await renderPage();
+    await switchToJobsTab();
+    await act(async () => fireEvent.click(screen.getByText("job-cwe-...")));
+
+    const list = screen.getByTestId("report-failed-items");
+    expect(within(list).getByText("com/acme/lib/1.0/lib-1.0.jar")).toBeInTheDocument();
+    expect(within(list).getByText("upstream returned 404")).toBeInTheDocument();
+    expect(within(list).getByText("checksum mismatch")).toBeInTheDocument();
+    expect(
+      screen.getByText("Repository 'conan-local' needs re-publishing."),
+    ).toBeInTheDocument();
   });
 
   it("renders the assessment panel and runs an assessment for assessment jobs", async () => {
