@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Independent YUM metadata roots within a Local RPM repository** (#906, backend artifact-keeper#4216, artifact-keeper#4230) - RPM users previously had only repository-root metadata, so sibling build directories could not serve independent package sets. Repodata Depth controls in repository creation and Settings now mirror the backend's directory-based metadata roots, with matching upload-path guidance and native curl/YUM setup examples. Zero preserves existing behavior; explicit changes require positively confirmed backend support and server-advertised bounds. Editing is limited to eligible empty Local RPM repositories, including no deleted artifact history, curation, publications or virtual membership; these roots do not create separate repositories or permissions. Older backends keep depth-zero workflows but cannot enable this setting. Operator documentation (`docs/rpm-repodata-depth.md`) ships with the backend; upgrade every backend node before enabling a positive depth, since mixed fleets are unsupported.
+
 ### Changed
 - **The web image now runs on Node.js 24** (#932) - the UI was still built and served on Node.js 22 although 24 is the current LTS line. The production image enables UBI 9's `nodejs:24` module stream instead of `nodejs:22`, the development image moves from `node:22-alpine` to `node:24-alpine`, and every CI job installs Node 24, so the image, local development and CI run the same major. No application code changed: Next.js 16, Vitest 4, Playwright and every locked dependency already support Node 24. The runtime stage is unchanged too, since the UBI package still ships `node` linked against `/usr/lib64/libnode.so.*`, which it copies with a glob. Operators need do nothing unless they build the image themselves on a mirror of the UBI 9 repositories, which must carry the `nodejs:24` stream.
 
